@@ -1,0 +1,189 @@
+.\"
+.\" Copyright (c) 2026 Murilo Ijanc' <murilo@ijanc.org>
+.\"
+.\" Permission to use, copy, modify, and/or distribute this software for any
+.\" purpose with or without fee is hereby granted, provided that the above
+.\" copyright notice and this permission notice appear in all copies.
+.\"
+.\" THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+.\" WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+.\" MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+.\" ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+.\" WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+.\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+.\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+.\"
+.Dd $Mdocdate: April 24 2026 $
+.Dt MARMITA 1
+.Os
+.Sh NAME
+.Nm marmita
+.Nd vendor single-file source dependencies from git
+.Sh SYNOPSIS
+.Nm marmita
+.Fl V
+.Nm marmita
+.Cm add
+.Op Fl r Ar ref
+.Ar url
+.Op Ar file
+.Nm marmita
+.Cm update
+.Op Ar file
+.Nm marmita
+.Cm rm
+.Ar file
+.Nm marmita
+.Cm list
+.Sh DESCRIPTION
+.Nm
+manages single-file source dependencies vendored from remote git
+repositories.
+Each dependency is one source file copied into
+.Pa vendor/
+at a pinned commit, recorded in a plain-text
+.Pa vendor/VENDOR
+manifest.
+.Pp
+.Nm
+operates on the
+.Pa vendor/
+directory of the current working directory and uses
+.Xr libgit2 3
+for all clone and object lookup operations.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl V
+Print the version and exit.
+.El
+.Pp
+The commands are as follows:
+.Bl -tag -width Ds
+.It Cm add Op Fl r Ar ref Ar url Op Ar file
+Clone
+.Ar url
+into a temporary directory, resolve
+.Ar ref
+.Pq default Li HEAD
+to a commit, copy
+.Ar file
+from that commit into
+.Pa vendor/ ,
+and record an entry in
+.Pa vendor/VENDOR .
+.Pp
+If
+.Ar file
+is omitted, it is deduced from the last path component of
+.Ar url
+with a
+.Li .rs
+suffix
+.Pq for example Li ssh://host/path/jackson No becomes Li jackson.rs .
+.Pp
+.Ar ref
+may be a tag, branch name, or commit object id.
+When a tag or branch is given it is recorded in the manifest as
+.Li ref:
+alongside the resolved
+.Li commit:
+oid; raw object ids are recorded only as
+.Li commit: .
+.It Cm update Op Ar file
+Refresh one entry, or every entry when
+.Ar file
+is omitted.
+For each entry,
+.Nm
+re-clones the
+.Li origin: ,
+re-resolves the recorded
+.Li ref:
+.Pq or Li HEAD No when no ref is recorded ,
+overwrites the local file with the new content, and updates
+.Li commit:
+and
+.Li date: .
+Entries pinned to a raw commit object id are skipped.
+.It Cm rm Ar file
+Remove
+.Ar file
+from
+.Pa vendor/
+and delete the matching entry from
+.Pa vendor/VENDOR .
+.It Cm list
+Print every entry in
+.Pa vendor/VENDOR
+to standard output, one per line.
+.El
+.Sh MANIFEST
+.Pa vendor/VENDOR
+is a plain-text manifest.
+Each entry is a header line containing the file name followed by
+tab-indented
+.Li key:\etvalue
+attribute lines.
+Entries are separated by blank lines:
+.Bd -literal -offset indent
+jackson.rs
+	origin:	ssh://ijanc@ijanc.org/json/jackson
+	ref:	v1.3.0
+	commit:	a4e84f6d2f21d8a5f28d17a38ed9968251325714
+	date:	2026-04-18
+
+http.rs
+	origin:	ssh://ijanc@ijanc.org/http
+	commit:	ebd3a89fa7acc0d377dff1cb734a8ab2282153d5
+	date:	2026-04-24
+.Ed
+.Pp
+The
+.Li commit:
+field is the source of truth for what is vendored.
+The
+.Li ref:
+field is optional and only present when
+.Cm add
+was invoked with a tag or branch via
+.Fl r ;
+it is read by
+.Cm update
+to know what to follow on the remote.
+.Sh EXIT STATUS
+.Nm
+exits 0 on success and non-zero on failure.
+A diagnostic message is written to standard error.
+.Sh EXAMPLES
+Add the
+.Li jackson.rs
+library at the latest commit on the default branch:
+.Bd -literal -offset indent
+$ marmita add ssh://ijanc@ijanc.org/json/jackson
+.Ed
+.Pp
+Pin to a specific tag:
+.Bd -literal -offset indent
+$ marmita add -r v1.3.0 ssh://ijanc@ijanc.org/json/jackson
+.Ed
+.Pp
+Refresh every dependency:
+.Bd -literal -offset indent
+$ marmita update
+.Ed
+.Pp
+Refresh just one:
+.Bd -literal -offset indent
+$ marmita update http.rs
+.Ed
+.Pp
+Remove a dependency:
+.Bd -literal -offset indent
+$ marmita rm http.rs
+.Ed
+.Sh SEE ALSO
+.Xr git 1 ,
+.Xr libgit2 3
+.Sh AUTHORS
+.An Murilo Ijanc' Aq Mt murilo@ijanc.org
