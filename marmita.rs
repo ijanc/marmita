@@ -27,6 +27,7 @@ use std::{
 
 const VENDOR_DIR: &str = "vendor";
 const VENDOR_FILE: &str = "vendor/VENDOR";
+const LINK_FILE: &str = "link.mk";
 const TRAILER: &str =
     "Managed by marmita(1).  Use 'marmita update' to refresh.\n";
 
@@ -523,6 +524,14 @@ fn deduce_filename(url: &str) -> String {
     format!("{stem}.rs")
 }
 
+fn link_name(file: &str) -> String {
+    let stem = Path::new(file)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(file);
+    format!("{stem}.mk")
+}
+
 fn looks_like_oid(s: &str) -> bool {
     s.len() >= 7 && s.len() <= 40 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
@@ -571,13 +580,14 @@ fn fetch_file(
     url: &str,
     spec: &str,
     file: &str,
-) -> Result<(String, Vec<u8>), String> {
+) -> Result<(String, Vec<u8>, Option<Vec<u8>>), String> {
     let tmp = make_tempdir()?;
     let result = (|| {
         let repo = clone(url, &tmp)?;
         let commit = resolve_commit(&repo, spec)?;
         let bytes = read_blob(&repo, &commit, file)?;
-        Ok((commit, bytes))
+        let link = read_blob(&repo, &commit, LINK_FILE).ok();
+        Ok((commit, bytes, link))
     })();
     let _ = fs::remove_dir_all(&tmp);
     result
@@ -611,13 +621,21 @@ fn cmd_add(args: &[String]) -> Result<(), String> {
     let file = file_arg.unwrap_or_else(|| deduce_filename(&url));
     let spec = reference.as_deref().unwrap_or("HEAD");
 
-    let (commit, bytes) = fetch_file(&url, spec, &file)?;
+    let (commit, bytes, link) = fetch_file(&url, spec, &file)?;
 
     fs::create_dir_all(VENDOR_DIR)
         .map_err(|e| format!("mkdir {VENDOR_DIR}: {e}"))?;
     let dest = Path::new(VENDOR_DIR).join(&file);
     fs::write(&dest, &bytes)
         .map_err(|e| format!("write {}: {e}", dest.display()))?;
+    let link_dest = Path::new(VENDOR_DIR).join(link_name(&file));
+    match link {
+        Some(b) => fs::write(&link_dest, b)
+            .map_err(|e| format!("write {}: {e}", link_dest.display()))?,
+        None => {
+            let _ = fs::remove_file(&link_dest);
+        }
+    }
 
     let mut entries: Vec<Entry> = read_manifest()?
         .into_iter()
@@ -672,10 +690,19 @@ fn cmd_update(args: &[String]) -> Result<(), String> {
                 continue;
             }
         };
-        let (commit, bytes) = fetch_file(&e.origin, &spec, &e.file)?;
+        let (commit, bytes, link) = fetch_file(&e.origin, &spec, &e.file)?;
         let dest = Path::new(VENDOR_DIR).join(&e.file);
         fs::write(&dest, &bytes)
             .map_err(|err| format!("write {}: {err}", dest.display()))?;
+        let link_dest = Path::new(VENDOR_DIR).join(link_name(&e.file));
+        match link {
+            Some(b) => fs::write(&link_dest, b).map_err(|err| {
+                format!("write {}: {err}", link_dest.display())
+            })?,
+            None => {
+                let _ = fs::remove_file(&link_dest);
+            }
+        }
         let changed = e.commit != commit;
         e.commit = commit.clone();
         e.date = today_utc();
@@ -712,6 +739,8 @@ fn cmd_rm(args: &[String]) -> Result<(), String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(format!("remove {}: {e}", path.display())),
     }
+    let link_path = Path::new(VENDOR_DIR).join(link_name(file));
+    let _ = fs::remove_file(&link_path);
     write_manifest(&mut entries)?;
     println!("removed {file}");
     Ok(())
